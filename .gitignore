@@ -1,2 +1,6 @@
 awstest
 aprtabletest
+*.swp
+*.o
+awsrequest
+shatest

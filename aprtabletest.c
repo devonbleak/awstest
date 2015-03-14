@@ -4,7 +4,7 @@
 #include <apr-1/apr_tables.h>
 #include <apr-1/apr_strings.h>
 
-static _get_apr_table_keys_callback(void *data, const char *key, const char *value)
+static int _get_apr_table_keys_callback(void *data, const char *key, const char *value)
 {
 	apr_array_header_t *arr = data;
 

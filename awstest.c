@@ -32,7 +32,7 @@ static size_t curl_writemem_callback(void *contents, size_t size, size_t nmemb, 
 
 int main(void)
 {
-	char credpath[128] = "http://169.254.169.254/2014-11-05/meta-data/iam/security-credentials/";
+	char credpath[256] = "http://169.254.169.254/2014-11-05/meta-data/iam/security-credentials/";
 	json_object *credobj, *tmpobj;
 	json_bool jsonret;
 	const char *accesskeyid, *secretaccesskey, *token;
@@ -128,6 +128,22 @@ int main(void)
 	token = json_object_get_string(tmpobj);
 
 	printf("got Token: %s\n", token);
+
+	// put together request headers
+	
+	// put together request body
+		
+		// table of query params
+
+		// json string
+	
+	// generate canonical request
+	//
+	// generate string to sign
+	//
+	// calculate signature
+	//
+	// generate curl request
 
 	return 0;
 }

@@ -8,6 +8,7 @@
 #include <apr-1/apr_tables.h>
 #include <apr-1/apr_strings.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 
 static struct
 {
@@ -198,6 +199,8 @@ CURLcode execute_signed_aws_request(
 		char **return_data,
 		size_t *return_size,
 		const char *method, 
+		const char *service,
+		const char *region,
 		const char *hostname, 
 		const char *path, 
 		apr_table_t *queryparams, 
@@ -208,17 +211,18 @@ CURLcode execute_signed_aws_request(
 {
 	CURL *ch;
 	CURLcode status;
-	char *canonical_request;
-	size_t canonical_size;
+	char *canonical_request, *signed_headers, *string_to_sign, *request_signature, *tmpcp;
 	apr_pool_t *pool;
 	apr_table_t *realheaders;
 	apr_status_t aprv;
 	time_t now;
 	apr_array_header_t *header_keys, *lower_header_keys;
-	int i;
+	int i, md_len;
+	unsigned char md_value[EVP_MAX_MD_SIZE];
 	size_t datetime_sz;
-	char datetime[32];
+	char datetime[32], today[9];
 
+	// make sure we have no query params
 	if(queryparams != NULL)
 	{
 		*return_data = strdup("Query Parameters are not supported (yet).");
@@ -226,6 +230,7 @@ CURLcode execute_signed_aws_request(
 		return CURLE_UNSUPPORTED_PROTOCOL;
 	}
 
+	// build the canonical request
 	/*
 	CanonicalRequest =
 	  HTTPRequestMethod + '\n' +
@@ -251,11 +256,14 @@ CURLcode execute_signed_aws_request(
 			NULL
 			);
 
+	// canonical headers
 	realheaders = apr_table_clone(pool, headers);
 	if(apr_table_get(realheaders, "Host") == NULL)
 	{
 		apr_table_set(realheaders, "Host", hostname);
 	}
+
+	// calculate datetime
 	now = time(NULL);
 	strftime(datetime, sizeof(datetime), "%Y%m%dT%H%M%SZ", gmtime(&now));
 	apr_table_set(realheaders, "x-amz-date", datetime);
@@ -274,10 +282,75 @@ CURLcode execute_signed_aws_request(
 				NULL
 				);
 	}
-	canonical_request = apr_pstrcat(pool, canonical_request, "\n", pstrtolower(pool, apr_array_pstrcat(pool, header_keys, ';')), "\n", psha256(pool, payload, payload_size), NULL);
 
+	// add signed headers and payload hash
+	signed_headers = pstrtolower(pool, apr_array_pstrcat(pool, header_keys, ';'));
+	canonical_request = apr_pstrcat(pool, canonical_request, "\n", signed_headers, "\n", psha256(pool, payload, payload_size), NULL);
 
-	fprintf(stderr, "Canonical Request (%d/%d): [%s]\n", strlen(canonical_request), canonical_size, canonical_request);
+	// build string to sign
+	apr_snprintf(today, 9, "%s", datetime);
+	string_to_sign = apr_pstrcat(pool,
+			"AWS-HMAC-SHA256\n",
+			datetime, "\n",
+			today, "/", region, "/", service, "/aws4_request\n",
+			psha256(pool, canonical_request, strlen(canonical_request)),
+			NULL
+			);
+
+	// build our key
+	/*
+	 * kSecret = Your AWS Secret Access Key
+	 * kDate = HMAC("AWS4" + kSecret, Date)
+	 * kRegion = HMAC(kDate, Region)
+	 * kService = HMAC(kRegion, Service)
+	 * kSigning = HMAC(kService, "aws4_request")
+	 */
+	HMAC(EVP_sha256(),
+			apr_pstrcat(pool, "AWS4", creds.secret_access_key, NULL), strlen(creds.secret_access_key) + 4,
+			today, 8,
+			md_value, &md_len
+		);
+	HMAC(EVP_sha256(),
+			md_value, md_len,
+			region, strlen(region),
+			md_value, &md_len
+		);
+	HMAC(EVP_sha256(),
+			md_value, md_len,
+			service, strlen(service),
+			md_value, &md_len
+		);
+	HMAC(EVP_sha256(),
+			md_value, md_len,
+			"aws4_request", strlen("aws4_request"),
+			md_value, &md_len
+		);
+	
+	// calculate the request signature
+	// signature = HexEncode(HMAC(derived-signing-key, string-to-sign))
+	HMAC(EVP_sha256(),
+			md_value, md_len,
+			string_to_sign, strlen(string_to_sign),
+			md_value, &md_len
+		);
+
+	request_signature = apr_palloc(pool, 2 * md_len + 1);
+	for(i = 0, tmpcp = request_signature; i < md_len; i++, tmpcp += 2)
+		apr_snprintf(tmpcp, 3, "%02x", md_value[i]);
+
+	if(strlen(creds.token))
+		apr_table_set(realheaders, "X-Amz-Security-Token", creds.token);
+
+	apr_table_set(realheaders, "Authorization", apr_pstrcat(pool,
+				"AWS4-HMAC-SHA256 Credential=",
+				creds.access_key_id, "/", today, "/", region, "/", service, "/aws4_request, ",
+				"SignedHeaders=", signed_headers, ", ",
+				"Signature=", request_signature,
+				NULL
+				)
+			);
+
+	fprintf(stderr, "Authorization header: [%s]\n", apr_table_get(realheaders, "Authorization"));
 
 	status = CURLE_OK;
 
@@ -322,6 +395,8 @@ int main()
 			&result,
 			&result_size,
 			"POST",
+			"ec2",
+			"us-east-1",
 			"ec2.us-east-1.amazonaws.com",
 			"/",
 			NULL,

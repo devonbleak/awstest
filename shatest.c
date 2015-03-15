@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 
 int main()
 {
@@ -27,6 +28,18 @@ int main()
 	fprintf(stderr, "\n");
 
 	EVP_cleanup();
+
+	HMAC(EVP_sha256(), "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", strlen("AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"), "20110909", 8, md_value, &md_len);
+	HMAC(EVP_sha256(), md_value, md_len, "us-east-1", strlen("us-east-1"), md_value, &md_len);
+	HMAC(EVP_sha256(), md_value, md_len, "iam", 3, md_value, &md_len);
+	HMAC(EVP_sha256(), md_value, md_len, "aws4_request", strlen("aws4_request"), md_value, &md_len);
+
+	for(i = 0; i < md_len; i++)
+	{
+		fprintf(stderr, "%d ", md_value[i]);
+	}
+
+	fprintf(stderr, "\n");
 
 	return 0;
 }

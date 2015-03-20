@@ -414,8 +414,6 @@ CURLcode execute_signed_aws_request(
 	curl_slist_free_all(pool_slist.slist);
 	curl_easy_cleanup(ch);
 	free(curlmemstruct.data);
-	curlmemstruct.data = malloc(sizeof(char));
-	curlmemstruct.size = 0;
 	apr_pool_destroy(pool);
 
 	return status;

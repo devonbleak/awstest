@@ -12,8 +12,8 @@ int main()
 	apr_status_t aprv;
 	apr_table_t *headers, *queryparams;
 	const char *payload = "{\"CiphertextBlob\":\"CiDSrhDgQeTnNqFX3qXI7jrxecTzKRwJrFZ428NieT2zGRKTAQEBAgB40q4Q4EHk5zahV96lyO468XnE8ykcCaxWeNvDYnk9sxkAAABqMGgGCSqGSIb3DQEHBqBbMFkCAQAwVAYJKoZIhvcNAQcBMB4GCWCGSAFlAwQBLjARBAx6HP9tsdd3bjxX2sYCARCAJ50G6b4RHJokacO/Aq4AQQBeXaI+bx41hUA1YGbsqLMda7TUmI57Lg==\"}";
-	CURLcode crv;
 	char *result;
+	CURLcode crv;
 	size_t result_size;
 	const char *encoded_result;
 	unsigned char *decoded_result;
@@ -53,11 +53,17 @@ int main()
 			NULL,
 			NULL,
 			"/",
-			NULL,
+			queryparams,
 			headers,
 			payload,
 			strlen(payload)
 			);
+
+	if(crv != CURLE_OK)
+	{
+		fprintf(stderr, "Error executing request: %s\n", result);
+		return 1;
+	}
 	
 	result_obj = json_tokener_parse(result);
 	jsonret = json_object_object_get_ex(result_obj, "Plaintext", &tmpobj);

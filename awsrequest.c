@@ -6,6 +6,7 @@
 #include <apr-1/apr_strings.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <ctype.h>
 
 // aws credentials
 static struct
@@ -136,7 +137,7 @@ static char *pstrtolower(apr_pool_t *pool, const char *s)
 	char *ret = apr_pstrdup(pool, s);
 	char *tmp;
 
-	for(tmp = ret; *tmp; *tmp++)
+	for(tmp = ret; *tmp; tmp++)
 		*tmp = tolower(*tmp);
 
 	return ret;
@@ -199,7 +200,8 @@ static char *psha256hex(apr_pool_t *pool, const char *message, size_t message_si
 	EVP_MD_CTX *mdctx;
 	const EVP_MD *md;
 	unsigned char md_value[EVP_MAX_MD_SIZE];
-	int md_len, i;
+	int i;
+	unsigned int md_len;
 	char *ret, *tmp;
 	
 	ret = apr_pcalloc(pool, (256 / 4 + 1 ) * sizeof(char));
@@ -288,10 +290,10 @@ CURLcode execute_signed_aws_request(
 	apr_table_t *realheaders;
 	apr_status_t aprv;
 	time_t now;
-	apr_array_header_t *header_keys, *lower_header_keys;
-	int i, md_len;
+	apr_array_header_t *header_keys;
+	int i;
+	unsigned int md_len;
 	unsigned char md_value[EVP_MAX_MD_SIZE];
-	size_t datetime_sz;
 	char datetime[32], today[9];
 
 	// make sure we have no query params
@@ -389,22 +391,22 @@ CURLcode execute_signed_aws_request(
 	 */
 	HMAC(EVP_sha256(),
 			apr_pstrcat(pool, "AWS4", creds.secret_access_key, NULL), strlen(creds.secret_access_key) + 4,
-			today, 8,
+			(unsigned char *)today, 8,
 			md_value, &md_len
 		);
 	HMAC(EVP_sha256(),
 			md_value, md_len,
-			region, strlen(region),
+			(unsigned char *)region, strlen(region),
 			md_value, &md_len
 		);
 	HMAC(EVP_sha256(),
 			md_value, md_len,
-			service, strlen(service),
+			(unsigned char *)service, strlen(service),
 			md_value, &md_len
 		);
 	HMAC(EVP_sha256(),
 			md_value, md_len,
-			"aws4_request", strlen("aws4_request"),
+			(unsigned char *)"aws4_request", strlen("aws4_request"),
 			md_value, &md_len
 		);
 	
@@ -412,7 +414,7 @@ CURLcode execute_signed_aws_request(
 	// signature = HexEncode(HMAC(derived-signing-key, string-to-sign))
 	HMAC(EVP_sha256(),
 			md_value, md_len,
-			string_to_sign, strlen(string_to_sign),
+			(unsigned char *)string_to_sign, strlen(string_to_sign),
 			md_value, &md_len
 		);
 

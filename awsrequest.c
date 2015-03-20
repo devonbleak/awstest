@@ -22,6 +22,8 @@ static struct memstruct
 	size_t size;
 } curlmemstruct;
 
+const char *local_region = NULL;
+
 // callback for capturing curl responses in memory
 static size_t curl_writemem_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
@@ -221,13 +223,56 @@ static char *psha256hex(apr_pool_t *pool, const char *message, size_t message_si
 	return ret;
 }
 
+const char *init_local_region()
+{
+	const char url[] = "http://169.254.169.254/2014-11-05/dynamic/instance-identity/document";
+	CURL *ch;
+	CURLcode crv;
+	json_object *idobj, *tmpobj;
+	json_bool jrv;
+
+	ch = curl_easy_init();
+	curl_easy_setopt(ch, CURLOPT_URL, url);
+
+	curlmemstruct.data = malloc(sizeof(char));
+	curlmemstruct.size = 0;
+	curl_easy_setopt(ch, CURLOPT_WRITEFUNCTION, curl_writemem_callback);
+	curl_easy_setopt(ch, CURLOPT_WRITEDATA, &curlmemstruct);
+
+	crv = curl_easy_perform(ch);
+	if(crv != CURLE_OK)
+		return NULL;
+
+	curl_easy_cleanup(ch);
+
+	idobj = json_tokener_parse(curlmemstruct.data);
+	jrv = json_object_object_get_ex(idobj, "region", &tmpobj);
+	if(!jrv)
+		return NULL;
+
+	local_region = strdup(json_object_get_string(tmpobj));
+
+	json_object_put(tmpobj);
+	json_object_put(idobj);
+
+	return local_region;
+}
+
+const char *get_local_region()
+{
+	if(local_region == NULL)
+		return init_local_region();
+
+	return local_region;
+}
+
 CURLcode execute_signed_aws_request(
 		char **return_data,
 		size_t *return_size,
 		const char *method, 
 		const char *service,
-		const char *region,
-		const char *hostname, 
+		const char *region_,
+		const char *hostname_,
 		const char *path, 
 		apr_table_t *queryparams, 
 		apr_table_t *headers, 
@@ -237,6 +282,7 @@ CURLcode execute_signed_aws_request(
 {
 	CURL *ch;
 	CURLcode status;
+	const char *region, *hostname;
 	char *canonical_request, *signed_headers, *string_to_sign, *request_signature, *tmpcp;
 	apr_pool_t *pool;
 	apr_table_t *realheaders;
@@ -251,7 +297,7 @@ CURLcode execute_signed_aws_request(
 	// make sure we have no query params
 	if(queryparams != NULL)
 	{
-		*return_data = strdup("Query Parameters are not supported (yet).");
+		*return_data = "Query Parameters are not supported (yet).";
 		*return_size = strlen(*return_data);
 		return CURLE_UNSUPPORTED_PROTOCOL;
 	}
@@ -264,6 +310,18 @@ CURLcode execute_signed_aws_request(
 		*return_size = strlen(*return_data);
 		return CURLE_OUT_OF_MEMORY;
 	}
+
+	// try a default region
+	region = region_ ? region_ : get_local_region();
+	if(region == NULL)
+	{
+		*return_data = "No region set and could not determine from metadata.";
+		*return_size = strlen(*return_data);
+		return CURLE_FAILED_INIT;
+	}
+
+	// try to build a hostname?
+	hostname = hostname_ ? hostname_ : apr_pstrcat(pool, service, ".", region, ".amazonaws.com", NULL);
 
 	// build the canonical request
 	/*
@@ -418,4 +476,3 @@ CURLcode execute_signed_aws_request(
 
 	return status;
 }
-
